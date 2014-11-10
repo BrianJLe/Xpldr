@@ -1,0 +1,383 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <link href="/application.css" media="all" rel="stylesheet" type="text/css" />
+    
+    <link type="text/css" rel="stylesheet" href="css/style.css">
+
+    <script src="http://ajax.googleapis.com/ajax/libs/jquery/1.11.1/jquery.min.js"></script>
+
+    <script  type="text/javascript" src="https://developer.api.autodesk.com/viewingservice/v1/viewers/viewer3D.min.js"></script>
+    
+  <title></title>
+    <style>
+    #canvas {
+        margin-left: auto;
+        margin-right: auto;
+        display: block;
+        background-color: black;
+    }
+    #controls {
+    }
+    #start_button, #stop_button {
+        font-size: 16pt;
+    }
+</style>
+</head>
+<body>
+
+
+<div class='main'>
+<H1>Xplodr</H1><div id="myval">0</div>
+<canvas id="canvas" width="800" height="256" style="display:none;"></canvas>
+
+<p id="controls">
+  <input type="button" id="start_button" value="Start">
+  &nbsp; &nbsp;
+  <input type="button" id="stop_button" value="Stop">
+    </p>
+ <div id="viewerElement">
+    </div>
+<script type="text/javascript">
+        $(document).ready(function () {
+
+    // Hack to handle vendor prefixes
+    navigator.getUserMedia = ( navigator.getUserMedia ||
+                               navigator.webkitGetUserMedia ||
+                               navigator.mozGetUserMedia ||
+                               navigator.msGetUserMedia);
+
+    window.requestAnimFrame = (function(){
+        return window.requestAnimationFrame       ||
+              window.webkitRequestAnimationFrame ||
+              window.mozRequestAnimationFrame    ||
+            function(callback, element){
+                window.setTimeout(callback, 1000/60);
+              };
+    })();
+
+    window.AudioContext = (function(){
+        return  window.webkitAudioContext || window.AudioContext || window.mozAudioContext;
+    })();
+
+    // Global Variables for Audio
+    var audioContext;
+    var analyserNode;
+    var javascriptNode;
+    var sampleSize = 1024;  // number of samples to collect before analyzing
+                            // decreasing this gives a faster sonogram, increasing it slows it down
+    var amplitudeArray;     // array to hold frequency data
+    var audioStream;
+
+    // Global Variables for Drawing
+    var column = 0;
+    var canvasWidth  = 800;
+    var canvasHeight = 256;
+    var ctx;
+                    var _viewer;
+
+
+    $(document).ready(function() {
+        ctx = $("#canvas").get()[0].getContext("2d");
+
+        try {
+            audioContext = new AudioContext();
+        } catch(e) {
+            alert('Web Audio API is not supported in this browser');
+        }
+
+        // When the Start button is clicked, finish setting up the audio nodes, and start
+        // processing audio streaming in from the input device
+        $("#start_button").click(function(e) {
+            e.preventDefault();
+            clearCanvas();
+
+            // get the input audio stream and set up the nodes
+            try {
+                navigator.getUserMedia(
+                  { video: false,
+                    audio: true},
+                  setupAudioNodes,
+                  onError);
+            } catch (e) {
+                alert('webkitGetUserMedia threw exception :' + e);
+            }
+        });
+
+        // Stop the audio processing
+        $("#stop_button").click(function(e) {
+            e.preventDefault();
+            javascriptNode.onaudioprocess = null;
+            if(audioStream) audioStream.stop();
+            if(sourceNode)  sourceNode.disconnect();
+        });
+    });
+
+    function setupAudioNodes(stream) {
+        // create the media stream from the audio input source (microphone)
+        sourceNode = audioContext.createMediaStreamSource(stream);
+        audioStream = stream;
+
+        analyserNode   = audioContext.createAnalyser();
+        javascriptNode = audioContext.createScriptProcessor(sampleSize, 1, 1);
+
+        // Create the array for the data values
+        amplitudeArray = new Uint8Array(analyserNode.frequencyBinCount);
+
+        // setup the event handler that is triggered every time enough samples have been collected
+        // trigger the audio analysis and draw one column in the display based on the results
+        javascriptNode.onaudioprocess = function () {
+
+            amplitudeArray = new Uint8Array(analyserNode.frequencyBinCount);
+            analyserNode.getByteTimeDomainData(amplitudeArray);
+
+            // draw one column of the display
+            requestAnimFrame(drawTimeDomain);
+        }
+
+        // Now connect the nodes together
+        // Do not connect source node to destination - to avoid feedback
+        sourceNode.connect(analyserNode);
+        analyserNode.connect(javascriptNode);
+        javascriptNode.connect(audioContext.destination);
+    }
+
+    function onError(e) {
+        console.log(e);
+    }
+        var hasRun = false;
+        var offsetModel = 0;
+
+    drawTimeDomain = function() {
+        var initVal = 0;
+
+        var minValue = 9999999;
+        var maxValue = 0;
+        
+        for (var i = 0; i < amplitudeArray.length; i++) {
+            var value = amplitudeArray[i] / 256;
+            if(value > maxValue) {
+                maxValue = value;
+            } else if(value < minValue) {
+                minValue = value;
+            }
+        }
+
+        var y_lo = canvasHeight - (canvasHeight * minValue) - 1;
+        var y_hi = canvasHeight - (canvasHeight * maxValue) - 1;
+
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(column,y_lo, 1, y_hi - y_lo);
+
+        // loop around the canvas when we reach the end
+        column += 1;
+        if(column >= canvasWidth) {
+            column = 0;
+            clearCanvas();
+        }
+        if(!hasRun){
+            hasRun = true;
+            initVal = y_lo;
+        }
+        offsetModel = y_lo - 150;
+        if(offsetModel < 0){
+            offsetModel = 0;   
+        }
+        offsetModel = offsetModel*2/100;
+        $("#myval").html(offsetModel);
+        _viewer.explode(offsetModel);
+    }
+
+    function clearCanvas() {
+        column = 0;
+        ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+        ctx.strokeStyle = '#f00';
+        var y = (canvasHeight / 2) + 0.5;
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvasWidth-1, y);
+        ctx.stroke();
+    }
+
+
+//start autodesk
+
+        ///////////////////////////////////////////////////////////////////////////
+        // On document ready callback
+        //
+        ///////////////////////////////////////////////////////////////////////////
+
+            //get token and urn from url parameters
+            var token = decodeURIComponent('O6bJnJloVLIC8ePki5X70R9hKYQm');
+
+            var urn = decodeURIComponent('dXJuOmFkc2sub2JqZWN0czpvcy5vYmplY3Q6YWRuLTAxLjEwLjIwMTQtMDUuMTguMzEvbGlsQnJhd2xlcjIwMTQwMTI4MTYwMDMwLmYzZA==');
+
+            console.log("Token: " + token);
+            console.log("Urn: " + urn);
+            console.log("File Id: " + atob(urn));
+
+            var viewerElement = document.getElementById(
+                'viewerElement');
+
+            var options = {
+                accessToken: token,
+                env: "AutodeskProduction"
+            };
+
+            Autodesk.Viewing.Initializer(options, function() {
+           
+                getViewablePath(
+                        Autodesk.Viewing.Private.getAuthObject(), 
+                        urn,
+                        null,
+                        function (path, is3d) {
+
+                            if(path){
+
+                                if (is3d) {
+                                    _viewer = new Autodesk.Viewing.Private.GuiViewer3D(
+                                        viewerElement, {});
+                                }
+                                else {
+                                    _viewer = new Autodesk.Viewing.Private.GuiViewer2D(
+                                        viewerElement, {});
+                                }
+
+                                _viewer.initialize();
+
+                                _viewer.addEventListener(
+                                    Autodesk.Viewing.GEOMETRY_LOADED_EVENT,
+                                    onGeometryLoaded);
+
+                                _viewer.load(path);
+                            }
+                        });
+            });
+            
+            // disable default context menu on viewer div 
+            $('#viewerElement').on('contextmenu', function(e) {
+                e.preventDefault();
+            });
+
+            // disable scrolling on DOM document 
+            // while mouse pointer is over viewer area
+            $('#viewerElement').hover(
+                function () {
+                    var x = window.scrollX;
+                    var y = window.scrollY;
+                    window.onscroll = function () {
+                        window.scrollTo(x, y);
+                    };
+                },
+                function () {
+                    window.onscroll = null;
+                }
+            );
+
+            //zoom all on escape
+            $(document).keyup(function (e) {
+                // esc
+                if (e.keyCode == 27) {
+                    zoomAll(_viewer);
+                }
+            });
+        });
+
+        ///////////////////////////////////////////////////////////////////////////
+        // Get 2d or 3d viewable path
+        //
+        ///////////////////////////////////////////////////////////////////////////
+        function getViewablePath(auth, documentId, initialItemId, callback) {
+
+            if (documentId.indexOf('urn:') !== 0)
+                documentId = 'urn:' + documentId;
+
+            Autodesk.Viewing.Document.load(
+                documentId,
+                auth,
+                function (document) {
+
+                    var items = [];
+
+                    if (initialItemId) {
+                        items = Autodesk.Viewing.Document.getSubItemsWithProperties(
+                            document.getRootItem(),
+                            { 'guid': initialItemId },
+                            true);
+                    }
+
+                    if (items.length == 0) {
+
+                        items = Autodesk.Viewing.Document.getSubItemsWithProperties(
+                            document.getRootItem(),
+                            { 'type': 'geometry', 'role': '2d' },
+                            true);
+
+                        if (items.length > 0) {
+
+                            var path2d = document.getViewablePath(items[0]);
+
+                            callback(path2d, false);
+                        }
+                    }
+
+                    if (items.length == 0) {
+
+                        items = Autodesk.Viewing.Document.getSubItemsWithProperties(
+                            document.getRootItem(),
+                            { 'type': 'geometry', 'role': '3d' },
+                            true);
+
+                        if (items.length > 0) {
+
+                            var path3d = document.getViewablePath(items[0]);
+
+                            callback(path3d, true);
+                        }
+                    }
+                },
+                function (error) {
+                    console.log("Error loading document: " + error)
+                    callback(null);
+                }
+            );
+        }
+
+        ///////////////////////////////////////////////////////////////////////////
+        // Zoom on root component
+        //
+        ///////////////////////////////////////////////////////////////////////////
+        function zoomAll(viewer) {
+
+            viewer.getObjectTree(function (rootComponent) {
+
+                //viewer.docstructure.handleAction(
+                //    ["focus"],
+                 ///   rootComponent.dbId);
+            });
+        }
+
+        ///////////////////////////////////////////////////////////////////////////
+        // Geometry Loaded event
+        //
+        ///////////////////////////////////////////////////////////////////////////
+        function onGeometryLoaded(event) {
+           
+            _viewer.removeEventListener(
+                Autodesk.Viewing.GEOMETRY_LOADED_EVENT,
+                onGeometryLoaded);
+
+			//_viewer.explode(offsetModel);
+            //zoomAll(_viewer);
+        };
+
+       //end autodesk
+</script>
+
+</div>
+
+
+
+</body>
+</html>
